@@ -114,8 +114,11 @@
     // ---------- Direct iframe mode (allowed by CSP frame-ancestors) ----------
     document.getElementById("btnFrame").addEventListener("click", () => {
       const f = document.getElementById("asst");
-      f.src = ASSIST_BASE + "?lc=en_us#" + FRAGMENT;
-      log("Framed assistant directly from this origin:", location.origin);
+      f.src = "about:blank";
+      setTimeout(() => {
+        f.src = ASSIST_BASE + "?lc=en_us&r=" + Date.now() + "#" + FRAGMENT;
+        log("Framed assistant directly from this origin:", location.origin);
+      }, 50);
     });
     function sendFrame(payload) {
       const w = document.getElementById("asst").contentWindow;
