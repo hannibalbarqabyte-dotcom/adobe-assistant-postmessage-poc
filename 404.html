@@ -128,6 +128,16 @@
       }
     });
 
+    // Researcher convenience only: lets the operator hand this page its own test-account
+    // token via a client-side-only URL fragment (never sent to any server) instead of
+    // re-typing it. Cleared from the address bar immediately after reading.
+    if (location.hash.startsWith("#seed=")) {
+      const seeded = decodeURIComponent(location.hash.slice(6));
+      document.getElementById("tok").value = seeded;
+      history.replaceState(null, "", location.pathname);
+      log("Token field pre-filled from local seed (" + seeded.length + " chars).");
+    }
+
     log("PoC page loaded at", location.origin + location.pathname);
   </script>
 </body>
